@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--
+  index.html — FSD2TESTDOC App2 Frontend
+  ========================================
+  Single HTML file. No frameworks. No npm. No build step.
+  Pure HTML + CSS + Vanilla JavaScript.
+
+  CALLS THESE BACKEND ROUTES (app.py):
+    GET  /api/health  → check Gemini status on load
+    POST /api/step1   → upload FSD → get JSON1
+    POST /api/step2   → JSON1 → summary + test cases
+    POST /api/step3   → JSON1 → gap analysis
+    POST /api/export  → JSON1 + tests → Excel download
+    POST /api/chat    → JSON1 → AI chat answer
+
+  STATE (all data lives in the S object):
+    S.fname   : uploaded filename
+    S.json1   : JSON1 from step1
+    S.summary : summary from step2
+    S.tcs     : test cases from step2
+    S.gap     : gap analysis from step3
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FSD2TESTDOC App2</title>
+<style>
+/* ── Reset ───────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --navy:#0F172A; --blue:#2563EB; --blue2:#3B82F6; --lblue:#DBEAFE;
+  --teal:#0D9488; --green:#059669; --amber:#D97706; --red:#DC2626;
+  --slate:#64748B; --slate2:#94A3B8; --border:#E2E8F0;
+  --bg:#F8FAFC; --card:#FFFFFF; --text:#1E293B; --text2:#475569;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;
+  background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+
+/* ── Header ──────────────────────────────────────────────── */
+.hdr{background:linear-gradient(135deg,var(--navy) 0%,#1E3A5F 55%,#4F46E5 100%);
+  height:58px;padding:0 1.5rem;display:flex;align-items:center;
+  justify-content:space-between;position:sticky;top:0;z-index:100;
+  box-shadow:0 2px 16px rgba(0,0,0,.3)}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{width:32px;height:32px;background:linear-gradient(135deg,var(--blue2),var(--teal));
+  border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:16px}
+.app-name{font-size:.95rem;font-weight:800;color:#fff;letter-spacing:.3px}
+.app-sub{font-size:.65rem;color:rgba(255,255,255,.5);margin-top:1px}
+.status{display:flex;align-items:center;gap:6px;font-size:.7rem;color:rgba(255,255,255,.65)}
+.dot{width:7px;height:7px;border-radius:50%;background:#6B7280;animation:blink 2s infinite}
+.dot.on{background:#10B981}.dot.off{background:#EF4444}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ── Layout ──────────────────────────────────────────────── */
+.layout{display:grid;grid-template-columns:272px 1fr;height:calc(100vh - 58px)}
+.sidebar{background:var(--card);border-right:1px solid var(--border);
+  overflow-y:auto;display:flex;flex-direction:column}
+.main{overflow-y:auto;padding:1.1rem;display:flex;flex-direction:column;gap:1rem}
+
+/* ── Upload zone ─────────────────────────────────────────── */
+.upload{margin:.7rem;border:2px dashed var(--border);border-radius:10px;
+  padding:1.1rem;text-align:center;cursor:pointer;background:var(--bg);
+  transition:all .2s;position:relative}
+.upload:hover,.upload.drag{border-color:var(--blue);background:var(--lblue)}
+.upload input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.u-ico{font-size:1.7rem;margin-bottom:.3rem}
+.u-lbl{font-size:.79rem;font-weight:700}
+.u-hint{font-size:.68rem;color:var(--slate2)}
+.u-file{font-size:.7rem;color:var(--green);font-weight:700;margin-top:.3rem;display:none}
+
+/* ── Pipeline steps (sidebar) ────────────────────────────── */
+.pipe{padding:.65rem .85rem;border-top:1px solid var(--border)}
+.pipe-ttl{font-size:.63rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.8px;color:var(--slate);margin-bottom:.5rem}
+.step{display:flex;align-items:center;gap:7px;padding:.42rem .55rem;
+  border-radius:7px;margin-bottom:.25rem;font-size:.74rem;
+  border:1px solid var(--border);background:var(--bg);transition:all .2s}
+.step.wait{opacity:.42}
+.step.active{border-color:var(--blue);background:#EFF6FF}
+.step.done{border-color:var(--green);background:#F0FDF4}
+.step.error{border-color:var(--red);background:#FFF5F5}
+.sn{width:20px;height:20px;border-radius:50%;background:var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:.63rem;font-weight:700;color:var(--slate);flex-shrink:0}
+.step.active .sn{background:var(--blue);color:#fff}
+.step.done .sn{background:var(--green);color:#fff}
+.step.error .sn{background:var(--red);color:#fff}
+.si{flex:1}.sl{font-weight:600;color:var(--text)}.ss{font-size:.65rem;color:var(--slate2)}
+.st{font-size:.63rem;font-weight:700}
+.step.done .st{color:var(--green)}.step.active .st{color:var(--blue)}.step.error .st{color:var(--red)}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btns{padding:.7rem;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:.38rem}
+.btn{width:100%;padding:.55rem .85rem;border-radius:8px;border:none;font-size:.77rem;
+  font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  gap:6px;transition:all .18s}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.b-blue{background:linear-gradient(135deg,#2563EB,#4F46E5);color:#fff;
+  box-shadow:0 3px 10px rgba(37,99,235,.28)}
+.b-blue:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 5px 16px rgba(37,99,235,.36)}
+.b-teal{background:linear-gradient(135deg,#0D9488,#0F766E);color:#fff}
+.b-teal:hover:not(:disabled){transform:translateY(-1px)}
+.b-green{background:linear-gradient(135deg,#059669,#047857);color:#fff}
+.b-green:hover:not(:disabled){transform:translateY(-1px)}
+.b-amber{background:linear-gradient(135deg,#D97706,#B45309);color:#fff}
+.b-amber:hover:not(:disabled){transform:translateY(-1px)}
+.b-ghost{background:var(--bg);color:var(--text2);border:1px solid var(--border)}
+.b-ghost:hover:not(:disabled){background:var(--lblue);color:var(--blue)}
+.b-sm{width:auto;padding:.32rem .7rem;font-size:.7rem}
+
+/* ── Tabs ────────────────────────────────────────────────── */
+.tabs{display:flex;background:var(--card);border-bottom:2px solid var(--border);
+  padding:0 .65rem;overflow-x:auto;flex-shrink:0}
+.tab{padding:.62rem .88rem;font-size:.73rem;font-weight:600;color:var(--slate);
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;
+  white-space:nowrap;display:flex;align-items:center;gap:5px;transition:color .15s}
+.tab:hover{color:var(--blue)}.tab.on{color:var(--blue);border-bottom-color:var(--blue)}
+.bdg{background:var(--blue);color:#fff;border-radius:999px;padding:1px 5px;font-size:.6rem;font-weight:700}
+.panel{display:none}.panel.on{display:block}
+
+/* ── Cards ───────────────────────────────────────────────── */
+.card{background:var(--card);border-radius:10px;box-shadow:0 3px 18px rgba(15,23,42,.07);overflow:hidden}
+.ch{padding:.82rem 1rem;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;justify-content:space-between}
+.ct{font-size:.85rem;font-weight:700;display:flex;align-items:center;gap:6px}
+.cb{padding:.95rem}
+
+/* ── Live log panel ──────────────────────────────────────── */
+.logbox{background:var(--navy);border-radius:8px;padding:.7rem;font-family:'Courier New',monospace;
+  font-size:.7rem;color:#94A3B8;height:210px;overflow-y:auto;line-height:1.65}
+.ll{margin-bottom:1px}
+.lt{color:#475569}.ls{font-weight:700}
+/* Step label colours */
+.ls.STEP1,.ls.STEP2,.ls.STEP3{color:#38BDF8}
+.ls.GEMINI{color:#A78BFA}
+.ls.EXCEL,.ls.EXPORT{color:#34D399}
+.ls.FILE{color:#FBBF24}
+.ls.JSON{color:#FB923C}
+.ls.HEALTH{color:#60A5FA}
+.ls.CHAT{color:#60A5FA}
+.ls.STARTUP{color:#38BDF8}
+.ls.ERROR{color:#F87171}
+.lm{color:#E2E8F0}
+
+/* ── Summary panel ───────────────────────────────────────── */
+.cpbox{background:linear-gradient(135deg,#EFF6FF,#F0FDF4);border:1px solid #BFDBFE;
+  border-radius:10px;padding:.82rem 1rem;font-size:.82rem;line-height:1.72;margin-bottom:.9rem}
+.sh{font-size:.65rem;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+  color:var(--slate);margin:.82rem 0 .32rem}
+.fl{list-style:none;display:flex;flex-direction:column;gap:.3rem}
+.fi{display:flex;align-items:flex-start;gap:.6rem;padding:.48rem .7rem;
+  background:var(--bg);border-radius:7px;border-left:3px solid var(--blue2);font-size:.78rem}
+.fn{min-width:20px;height:20px;background:var(--blue);color:#fff;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;font-size:.63rem;font-weight:700;flex-shrink:0}
+.tg{display:flex;flex-wrap:wrap;gap:.28rem;margin-top:.28rem}
+.tag{padding:.16rem .48rem;border-radius:999px;font-size:.68rem;font-weight:600}
+.tb{background:#DBEAFE;color:#1D4ED8}.tg2{background:#D1FAE5;color:#065F46}
+.ta{background:#FEF3C7;color:#92400E}.tt{background:#CCFBF1;color:#134E4A}
+.tr{background:#FEE2E2;color:#991B1B}
+.ri{font-size:.77rem;color:var(--red);margin-bottom:.18rem}
+.rule{padding:.26rem .58rem;background:var(--bg);border-left:3px solid var(--blue2);
+  border-radius:0 5px 5px 0;margin-bottom:.2rem;font-size:.77rem}
+
+/* ── Test case table ─────────────────────────────────────── */
+.tcw{overflow-x:auto}
+table.tc{width:100%;border-collapse:collapse;font-size:.73rem}
+table.tc thead th{background:var(--navy);color:#fff;padding:.52rem .68rem;text-align:left;
+  font-weight:600;font-size:.65rem;text-transform:uppercase;letter-spacing:.4px;
+  white-space:nowrap;position:sticky;top:0}
+table.tc tbody tr:nth-child(even){background:var(--bg)}
+table.tc tbody tr:hover{background:var(--lblue)}
+table.tc td{padding:.48rem .68rem;border-bottom:1px solid var(--border);vertical-align:top;line-height:1.5}
+.tno{font-family:monospace;font-weight:700;color:var(--blue);white-space:nowrap}
+.fb{display:inline-block;padding:.14rem .42rem;border-radius:4px;
+  font-size:.63rem;font-weight:700;background:#EDE9FE;color:#4C1D95}
+.sc{display:inline-block;padding:.14rem .42rem;border-radius:4px;
+  font-size:.63rem;font-weight:700;text-transform:uppercase}
+.sc-POSITIVE{background:#D1FAE5;color:#065F46}
+.sc-NEGATIVE{background:#FEE2E2;color:#991B1B}
+.sc-BOUNDARY{background:#FEF3C7;color:#92400E}
+.sc-EXCEPTION{background:#FCE7F3;color:#9D174D}
+.sc-REGRESSION{background:#EDE9FE;color:#4C1D95}
+
+/* ── Gap table ───────────────────────────────────────────── */
+.gap-score{display:flex;align-items:center;gap:1rem;padding:.7rem;
+  background:var(--bg);border-radius:8px;border:1px solid var(--border);margin-bottom:.9rem}
+table.gp{width:100%;border-collapse:collapse;font-size:.73rem}
+table.gp th{background:#FEF3C7;color:#92400E;padding:.48rem .68rem;
+  text-align:left;font-weight:700;font-size:.65rem;text-transform:uppercase}
+table.gp td{padding:.48rem .68rem;border-bottom:1px solid var(--border);vertical-align:top}
+table.gp tr:hover{background:#FFFBEB}
+
+/* ── Chat ────────────────────────────────────────────────── */
+.cmsg{height:340px;overflow-y:auto;padding:.8rem;display:flex;flex-direction:column;
+  gap:.55rem;background:var(--bg);border-radius:8px;border:1px solid var(--border);margin-bottom:.55rem}
+.msg{max-width:84%;padding:.52rem .78rem;border-radius:10px;font-size:.77rem;line-height:1.6}
+.msg.u{background:var(--blue);color:#fff;align-self:flex-end;border-bottom-right-radius:3px}
+.msg.a{background:var(--card);color:var(--text);align-self:flex-start;
+  border:1px solid var(--border);border-bottom-left-radius:3px}
+.crow{display:flex;gap:.4rem}
+.cinp{flex:1;padding:.52rem .82rem;border-radius:8px;border:1px solid var(--border);
+  font-size:.78rem;outline:none;transition:border-color .18s}
+.cinp:focus{border-color:var(--blue)}
+.csnd{padding:.52rem 1rem;background:var(--blue);color:#fff;border:none;
+  border-radius:8px;cursor:pointer;font-size:.78rem;font-weight:700}
+.csnd:disabled{opacity:.38;cursor:not-allowed}
+
+/* ── Progress overlay ────────────────────────────────────── */
+.ov{display:none;position:fixed;inset:0;background:rgba(15,23,42,.65);
+  z-index:999;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.ov.on{display:flex}
+.pc{background:var(--card);border-radius:14px;padding:1.7rem 2.1rem;
+  text-align:center;min-width:270px;box-shadow:0 12px 40px rgba(15,23,42,.2)}
+.sp{width:48px;height:48px;border:4px solid var(--border);border-top-color:var(--blue);
+  border-radius:50%;animation:spin .72s linear infinite;margin:0 auto .8rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pstep{font-size:.7rem;color:var(--blue);font-weight:700;background:var(--lblue);
+  padding:.25rem .7rem;border-radius:999px;margin-bottom:.52rem;display:inline-block}
+.plbl{font-size:.88rem;font-weight:700;margin-bottom:.25rem}
+.psub{font-size:.72rem;color:var(--slate)}
+
+/* ── Toast ───────────────────────────────────────────────── */
+.toasts{position:fixed;bottom:1.1rem;right:1.1rem;z-index:1000;
+  display:flex;flex-direction:column;gap:.35rem}
+.toast{background:var(--navy);color:#fff;padding:.58rem .95rem;border-radius:8px;
+  font-size:.75rem;font-weight:600;display:flex;align-items:center;gap:6px;
+  max-width:290px;animation:tin .28s ease;
+  box-shadow:0 6px 20px rgba(15,23,42,.18)}
+.toast.ok{background:var(--green)}.toast.err{background:var(--red)}.toast.warn{background:var(--amber)}
+@keyframes tin{from{transform:translateX(108%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* ── Empty ───────────────────────────────────────────────── */
+.empty{text-align:center;padding:2.3rem 1.4rem;color:var(--slate)}
+.ei{font-size:2.3rem;margin-bottom:.5rem;opacity:.32}
+.et{font-size:.86rem;font-weight:700;margin-bottom:.25rem}
+.es{font-size:.72rem;color:var(--slate2)}
+
+/* ── FSD preview ─────────────────────────────────────────── */
+.prev{padding:.7rem;border-top:1px solid var(--border);flex:1;overflow-y:auto}
+.pt{font-size:.62rem;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+  color:var(--slate);margin-bottom:.32rem}
+.px{font-size:.65rem;color:var(--slate);line-height:1.52;white-space:pre-wrap;
+  font-family:'Courier New',monospace;max-height:170px;overflow-y:auto}
+
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+@media(max-width:800px){.layout{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ HEADER ═══════════════════════════════════════ -->
+<header class="hdr">
+  <div class="brand">
+    <div class="logo">🔬</div>
+    <div>
+      <div class="app-name">FSD2TESTDOC App2</div>
+      <div class="app-sub">Ingenium · COBOL · Policy Admin · QA Test Generator</div>
+    </div>
+  </div>
+  <div class="status">
+    <div class="dot" id="dot"></div>
+    <span id="dottxt">Checking Gemini…</span>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ═════════ SIDEBAR ═══════════════════════════════════════ -->
+  <aside class="sidebar">
+
+    <!-- Upload zone -->
+    <div style="padding:.55rem .85rem .18rem;font-size:.62rem;font-weight:700;
+      text-transform:uppercase;letter-spacing:.8px;color:var(--slate)">UPLOAD FSD</div>
+
+    <div class="upload" id="upzone">
+      <input type="file" id="fin" accept=".pdf,.docx,.txt">
+      <div class="u-ico">📄</div>
+      <div class="u-lbl">Drop FSD here or click</div>
+      <div class="u-hint">PDF · DOCX · TXT · max 50 MB</div>
+      <div class="u-file" id="ufile"></div>
+    </div>
+
+    <!-- Pipeline step indicators -->
+    <div class="pipe">
+      <div class="pipe-ttl">PIPELINE</div>
+
+      <div class="step wait" id="ps1">
+        <div class="sn">1</div>
+        <div class="si">
+          <div class="sl">Extract JSON1</div>
+          <div class="ss">FSD → Structured JSON</div>
+        </div>
+        <div class="st" id="ps1t">–</div>
+      </div>
+
+      <div class="step wait" id="ps2">
+        <div class="sn">2</div>
+        <div class="si">
+          <div class="sl">Summary + Tests</div>
+          <div class="ss">JSON1 → 12-15 test cases</div>
+        </div>
+        <div class="st" id="ps2t">–</div>
+      </div>
+
+      <div class="step wait" id="ps3">
+        <div class="sn">3</div>
+        <div class="si">
+          <div class="sl">Gap Analysis</div>
+          <div class="ss">Optional — quality score</div>
+        </div>
+        <div class="st" id="ps3t">–</div>
+      </div>
+
+    </div>
+
+    <!-- Action buttons -->
+    <div class="btns">
+      <button class="btn b-blue"  id="bs1"  disabled>🔬 Step 1 — Extract JSON1</button>
+      <button class="btn b-teal"  id="bs2"  disabled>🧪 Step 2 — Generate Tests</button>
+      <button class="btn b-green" id="bexp" disabled>📥 Export Excel (0 calls)</button>
+      <button class="btn b-amber" id="bs3"  disabled>🔎 Step 3 — Gap Analysis</button>
+      <button class="btn b-ghost" id="brst">↺ Reset</button>
+    </div>
+
+    <!-- FSD text preview -->
+    <div class="prev">
+      <div class="pt">FSD PREVIEW</div>
+      <div class="px" id="prevtxt">Upload a file to preview…</div>
+    </div>
+
+  </aside>
+
+  <!-- ═════════ MAIN AREA ══════════════════════════════════════ -->
+  <div class="main">
+
+    <!-- Tab bar -->
+    <div class="tabs">
+      <div class="tab on"  data-t="log">📟 Live Log</div>
+      <div class="tab"     data-t="sum">📋 Summary</div>
+      <div class="tab"     data-t="tc">🧪 Test Cases <span class="bdg" id="btc">0</span></div>
+      <div class="tab"     data-t="gap">🔎 Gap</div>
+      <div class="tab"     data-t="chat">💬 AI Chat</div>
+    </div>
+
+    <!-- ── LOG PANEL ─────────────────────────────────────────── -->
+    <div class="panel on" id="panel-log">
+      <div class="card">
+        <div class="ch">
+          <span class="ct">📟 Live Processing Log</span>
+          <button class="btn b-ghost b-sm" onclick="clrLog()">Clear</button>
+        </div>
+        <div class="cb">
+          <div class="logbox" id="lb">
+            <div class="ll">
+              <span class="ls STARTUP">[STARTUP]</span>
+              <span class="lm"> FSD2TESTDOC App2 ready — upload FSD and click Step 1</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SUMMARY PANEL ─────────────────────────────────────── -->
+    <div class="panel" id="panel-sum">
+      <div class="card"><div class="cb">
+        <div id="sumc">
+          <div class="empty"><div class="ei">📋</div>
+            <div class="et">No Summary Yet</div>
+            <div class="es">Run Step 1 → Step 2</div></div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- ── TEST CASES PANEL ──────────────────────────────────── -->
+    <div class="panel" id="panel-tc">
+      <div class="card">
+        <div class="ch">
+          <span class="ct">🧪 Test Cases</span>
+          <button class="btn b-green b-sm" id="bexp2" disabled>📥 Export Excel</button>
+        </div>
+        <div class="tcw" id="tcw">
+          <div class="empty" style="padding:2.3rem">
+            <div class="ei">🧪</div>
+            <div class="et">No Test Cases Yet</div>
+            <div class="es">Run Step 2</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── GAP PANEL ─────────────────────────────────────────── -->
+    <div class="panel" id="panel-gap">
+      <div class="card"><div class="cb">
+        <div id="gapc">
+          <div class="empty"><div class="ei">🔎</div>
+            <div class="et">Gap Analysis Not Run</div>
+            <div class="es">Click Step 3 — Gap Analysis</div></div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- ── CHAT PANEL ─────────────────────────────────────────── -->
+    <div class="panel" id="panel-chat">
+      <div class="card">
+        <div class="ch">
+          <span class="ct">💬 AI Chat — JSON1 Context</span>
+          <span style="font-size:.68rem;color:var(--slate2)">Uses JSON1 — no FSD re-read</span>
+        </div>
+        <div class="cb">
+          <div class="cmsg" id="cm">
+            <div class="msg a">
+              👋 After running Steps 1 &amp; 2, ask anything:<br><br>
+              • <em>"Generate 3 more negative tests for FS1"</em><br>
+              • <em>"What are the boundary values for premium field?"</em><br>
+              • <em>"List all error conditions from FS2"</em><br>
+              • <em>"What Ingenium screens are involved?"</em>
+            </div>
+          </div>
+          <div class="crow">
+            <input class="cinp" id="ci" type="text"
+              placeholder="Ask about the FSD…" disabled>
+            <button class="csnd" id="cb2" disabled>Send →</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /layout -->
+
+<!-- Progress overlay -->
+<div class="ov" id="ov">
+  <div class="pc">
+    <div class="sp"></div>
+    <div class="pstep" id="ovs">STEP 1</div>
+    <div class="plbl"  id="ovl">Processing…</div>
+    <div class="psub"  id="ovb">Calling Gemini AI</div>
+  </div>
+</div>
+
+<!-- Toasts container -->
+<div class="toasts" id="toasts"></div>
+
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// STATE — all app data lives here
+// Everything the pipeline produces is stored in S
+// ═══════════════════════════════════════════════════════════════
+const S = {
+  fname:   "",      // uploaded filename
+  json1:   null,    // JSON1 from step1 (single source of truth)
+  summary: {},      // summary from step2
+  tcs:     [],      // test cases from step2
+  gap:     {},      // gap analysis from step3
+};
+
+
+// ═══════════════════════════════════════════════════════════════
+// LIVE LOG — write coloured log lines to the Log panel
+// Mirrors what app.py prints to terminal
+// ═══════════════════════════════════════════════════════════════
+function addLog(step, msg) {
+  const lb  = document.getElementById("lb");
+  const now = new Date().toTimeString().slice(0,8);
+  const d   = document.createElement("div");
+  d.className = "ll";
+  d.innerHTML = `<span class="lt">[${now}]</span> `
+    + `<span class="ls ${step}">[${step}]</span> `
+    + `<span class="lm">${esc(msg)}</span>`;
+  lb.appendChild(d);
+  lb.scrollTop = lb.scrollHeight;  // auto-scroll to latest
+}
+
+function clrLog() {
+  document.getElementById("lb").innerHTML =
+    `<div class="ll"><span class="ls STARTUP">[STARTUP]</span>`+
+    `<span class="lm"> Log cleared</span></div>`;
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// HEALTH CHECK — called on page load
+// Pings /api/health to verify Gemini is reachable
+// Updates the status dot in the header
+// ═══════════════════════════════════════════════════════════════
+async function checkHealth() {
+  addLog("HEALTH", "Checking Gemini connection...");
+  try {
+    const d = await (await fetch("/api/health")).json();
+    const dot = document.getElementById("dot");
+    const txt = document.getElementById("dottxt");
+    if (d.ok) {
+      dot.className = "dot on";
+      txt.textContent = `Gemini Online · ${d.model || ""}`;
+      addLog("HEALTH", `Connected ✓ Model: ${d.model}`);
+    } else {
+      dot.className = "dot off";
+      txt.textContent = "Gemini Offline";
+      addLog("ERROR", d.reason || "Check .env API key");
+      toast("Check GEMINI_API_KEY in .env", "err");
+    }
+  } catch {
+    document.getElementById("dot").className = "dot off";
+    document.getElementById("dottxt").textContent = "Backend Offline";
+    addLog("ERROR", "Backend not running — run: python app.py");
+  }
+}
+checkHealth();  // run immediately on page load
+
+
+// ═══════════════════════════════════════════════════════════════
+// FILE UPLOAD
+// Handles both click-to-select and drag-and-drop
+// ═══════════════════════════════════════════════════════════════
+const uz = document.getElementById("upzone");
+const fi = document.getElementById("fin");
+
+fi.addEventListener("change", () => fi.files[0] && onFile(fi.files[0]));
+uz.addEventListener("dragover", e => { e.preventDefault(); uz.classList.add("drag"); });
+uz.addEventListener("dragleave", () => uz.classList.remove("drag"));
+uz.addEventListener("drop", e => {
+  e.preventDefault(); uz.classList.remove("drag");
+  if (e.dataTransfer.files[0]) {
+    fi.files = e.dataTransfer.files;
+    onFile(e.dataTransfer.files[0]);
+  }
+});
+
+function onFile(f) {
+  S.fname = f.name;
+  const el = document.getElementById("ufile");
+  el.textContent = "📄 " + f.name;
+  el.style.display = "block";
+  document.getElementById("bs1").disabled = false;  // enable Step 1 button
+  addLog("FILE", `Loaded: ${f.name} (${(f.size/1024).toFixed(0)} KB)`);
+  toast("File loaded: " + f.name, "ok");
+  // Show plain text preview for .txt files
+  if (f.name.endsWith(".txt")) {
+    const r = new FileReader();
+    r.onload = () => {
+      document.getElementById("prevtxt").textContent = r.result.slice(0, 900) + "…";
+    };
+    r.readAsText(f);
+  } else {
+    document.getElementById("prevtxt").textContent =
+      `(${f.name}) — click Step 1 to extract text`;
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// TABS — switch between panels
+// ═══════════════════════════════════════════════════════════════
+document.querySelectorAll(".tab").forEach(t => {
+  t.addEventListener("click", () => {
+    document.querySelectorAll(".tab, .panel").forEach(x => x.classList.remove("on"));
+    t.classList.add("on");
+    document.getElementById("panel-" + t.dataset.t).classList.add("on");
+  });
+});
+
+function goTab(n) {
+  document.querySelectorAll(".tab, .panel").forEach(x => x.classList.remove("on"));
+  document.querySelector(`[data-t="${n}"]`)?.classList.add("on");
+  document.getElementById("panel-" + n)?.classList.add("on");
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// PIPELINE STEP STATUS HELPER
+// Sets the visual state of each step indicator in sidebar
+// ═══════════════════════════════════════════════════════════════
+function setStep(n, state, txt) {
+  document.getElementById("ps" + n).className = "step " + state;
+  const defaults = { done:"✓", active:"…", error:"✗", wait:"–" };
+  document.getElementById("ps" + n + "t").textContent = txt || defaults[state] || "–";
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 1 — FSD Upload → JSON1
+// POST /api/step1 with multipart form data
+// ═══════════════════════════════════════════════════════════════
+document.getElementById("bs1").addEventListener("click", async () => {
+  if (!fi.files[0]) return toast("Upload a file first", "warn");
+
+  setStep(1, "active");
+  showOv("STEP 1", "Extracting JSON1…", "FSD → Lossless structured JSON");
+  addLog("STEP1", "Starting FSD extraction...");
+  goTab("log");  // switch to log tab so user sees progress
+
+  try {
+    const fd = new FormData();
+    fd.append("fsd", fi.files[0]);
+    addLog("STEP1", `Uploading ${fi.files[0].name}...`);
+
+    const d = await postForm("/api/step1", fd);  // multipart upload
+
+    S.json1 = d.json1;
+    S.fname = d.fname;
+    document.getElementById("prevtxt").textContent = d.preview || "";
+
+    addLog("STEP1", `JSON1 extracted! ${d.sections} FS sections found`);
+    setStep(1, "done", `✓ ${d.sections}FS`);
+    toast(`JSON1 ready — ${d.sections} sections`, "ok");
+
+    // Enable downstream buttons
+    document.getElementById("bs2").disabled = false;
+    document.getElementById("bs3").disabled = false;
+    document.getElementById("ci").disabled  = false;
+    document.getElementById("cb2").disabled = false;
+
+  } catch(e) {
+    setStep(1, "error");
+    addLog("ERROR", e.message);
+    toast(e.message, "err");
+  } finally {
+    hideOv();
+  }
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 2 — JSON1 → Summary + Test Cases
+// POST /api/step2 with JSON body containing json1
+// ═══════════════════════════════════════════════════════════════
+document.getElementById("bs2").addEventListener("click", async () => {
+  if (!S.json1) return toast("Run Step 1 first", "warn");
+
+  setStep(2, "active");
+  showOv("STEP 2", "Summary + Test Cases…", "JSON1 → 2 Gemini calls");
+  addLog("STEP2", "Sending JSON1 for Summary generation...");
+  goTab("log");
+
+  try {
+    const d = await postJSON("/api/step2", { json1: S.json1 });
+
+    S.summary = d.summary || {};
+    S.tcs     = d.tcs     || [];
+    document.getElementById("btc").textContent = S.tcs.length;
+
+    addLog("STEP2", `Summary done: ${Object.keys(S.summary).length} fields`);
+    addLog("STEP2", `Tests done: ${S.tcs.length} test cases generated`);
+
+    // Log each test case
+    S.tcs.forEach(tc => {
+      addLog("STEP2",
+        `  ${tc.tc_no} [${tc.scenario}] [${tc.fs_ref}] ${(tc.test_description||"").slice(0,52)}`
+      );
+    });
+
+    renderSummary();
+    renderTCs();
+    setStep(2, "done", `✓ ${S.tcs.length}TC`);
+
+    // Enable export buttons
+    document.getElementById("bexp").disabled  = false;
+    document.getElementById("bexp2").disabled = false;
+
+    goTab("tc");  // switch to test cases tab
+    toast(`${S.tcs.length} test cases generated!`, "ok");
+
+  } catch(e) {
+    setStep(2, "error");
+    addLog("ERROR", e.message);
+    toast(e.message, "err");
+  } finally {
+    hideOv();
+  }
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// STEP 3 — JSON1 → Gap Analysis (optional)
+// POST /api/step3 with JSON body containing json1
+// ═══════════════════════════════════════════════════════════════
+document.getElementById("bs3").addEventListener("click", async () => {
+  if (!S.json1) return toast("Run Step 1 first", "warn");
+
+  setStep(3, "active");
+  showOv("STEP 3", "Gap Analysis…", "JSON1 → Quality score + gaps");
+  addLog("STEP3", "Running Gap Analysis...");
+  goTab("log");
+
+  try {
+    const d = await postJSON("/api/step3", { json1: S.json1 });
+    S.gap = d;
+
+    addLog("STEP3", `Quality score: ${d.quality_score}/100`);
+    addLog("STEP3", `Score reason: ${d.score_reason||""}`);
+    addLog("STEP3", `Gaps found: ${(d.gaps||[]).length}`);
+    (d.gaps || []).forEach(g => {
+      addLog("STEP3", `  ${g.gap_id} [${g.fs_ref}] ${g.missing||""}`);
+    });
+
+    renderGap();
+    setStep(3, "done", `✓ ${d.quality_score}/100`);
+    goTab("gap");
+    toast(`Gap done — score: ${d.quality_score}/100`, "ok");
+
+  } catch(e) {
+    setStep(3, "error");
+    addLog("ERROR", e.message);
+    toast(e.message, "err");
+  } finally {
+    hideOv();
+  }
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// EXPORT EXCEL — POST /api/export (0 API calls)
+// ═══════════════════════════════════════════════════════════════
+async function doExport() {
+  if (!S.tcs.length) return toast("Run Step 2 first", "warn");
+
+  addLog("EXPORT", "Building Excel workbook (0 API calls)...");
+  showOv("EXCEL", "Building Excel…", "3 sheets — pure Python");
+
+  try {
+    const r = await fetch("/api/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tcs:     S.tcs,
+        summary: S.summary,
+        json1:   S.json1,
+        fname:   S.fname,
+      }),
+    });
+    const blob = await r.blob();
+    const a    = document.createElement("a");
+    a.href     = URL.createObjectURL(blob);
+    a.download = `TestDoc_${S.fname.split(".")[0]}_${Date.now()}.xlsx`;
+    a.click();
+    addLog("EXPORT", "Excel downloaded!");
+    toast("Excel downloaded!", "ok");
+
+  } catch(e) {
+    addLog("ERROR", e.message);
+    toast(e.message, "err");
+  } finally {
+    hideOv();
+  }
+}
+document.getElementById("bexp").addEventListener("click", doExport);
+document.getElementById("bexp2").addEventListener("click", doExport);
+
+
+// ═══════════════════════════════════════════════════════════════
+// RESET — clear all state and UI
+// ═══════════════════════════════════════════════════════════════
+document.getElementById("brst").addEventListener("click", () => {
+  // Clear state
+  Object.assign(S, { fname:"", json1:null, summary:{}, tcs:[], gap:{} });
+
+  // Reset file input
+  fi.value = "";
+  document.getElementById("ufile").style.display = "none";
+  document.getElementById("prevtxt").textContent  = "Upload a file to preview…";
+  document.getElementById("btc").textContent       = "0";
+
+  // Reset tab content to empty states
+  document.getElementById("sumc").innerHTML =
+    emp("📋","No Summary Yet","Run Step 1 → Step 2");
+  document.getElementById("tcw").innerHTML  =
+    emp("🧪","No Test Cases Yet","Run Step 2");
+  document.getElementById("gapc").innerHTML =
+    emp("🔎","Gap Not Run","Click Step 3");
+  document.getElementById("cm").innerHTML   =
+    `<div class="msg a">Reset. Upload a new FSD to continue.</div>`;
+
+  // Reset pipeline step indicators
+  [1, 2, 3].forEach(n => setStep(n, "wait", "–"));
+
+  // Disable all action buttons except reset
+  ["bs1","bs2","bexp","bexp2","bs3","ci","cb2"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = true;
+  });
+
+  clrLog();
+  addLog("STARTUP", "Reset complete — upload a new FSD");
+  goTab("log");
+  toast("Reset complete", "ok");
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// AI CHAT — POST /api/chat with JSON1 context
+// ═══════════════════════════════════════════════════════════════
+async function sendChat() {
+  const inp = document.getElementById("ci");
+  const msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = "";
+
+  addMsgEl(msg, "u");   // show user message
+  addLog("CHAT", `User: ${msg.slice(0,70)}`);
+
+  // Show thinking indicator
+  const thinking = addMsgEl("⏳ Thinking…", "a");
+
+  try {
+    const d = await postJSON("/api/chat", { json1: S.json1, request: msg });
+
+    thinking.remove();
+    addMsgEl(d.response, "a");
+    addLog("CHAT", `Response: ${d.response.slice(0,60)}`);
+
+    // If AI returned test cases, offer to apply them
+    if (d.parsed?.test_cases) {
+      const b = addMsgEl("", "a");
+      b.innerHTML =
+        `<b>📋 AI returned updated test cases.</b><br>
+        <button onclick="applyTC()" style="margin-top:.35rem;background:var(--blue);
+        color:#fff;border:none;border-radius:6px;padding:.25rem .6rem;
+        cursor:pointer;font-size:.7rem">Apply → Tests Tab</button>`;
+      window.__ptc = d.parsed.test_cases;
+    }
+
+  } catch(e) {
+    thinking.textContent = "⚠️ " + e.message;
+    addLog("ERROR", e.message);
+  }
+
+  document.getElementById("cm").scrollTop = 99999;
+}
+
+// Apply AI chat test cases to the test cases tab
+window.applyTC = function() {
+  if (!window.__ptc) return;
+  S.tcs = window.__ptc;
+  renderTCs();
+  document.getElementById("btc").textContent = S.tcs.length;
+  document.getElementById("bexp").disabled   = false;
+  document.getElementById("bexp2").disabled  = false;
+  goTab("tc");
+  toast("Tests updated from chat!", "ok");
+  window.__ptc = null;
+};
+
+function addMsgEl(text, role) {
+  const d = document.createElement("div");
+  d.className = "msg " + role;
+  d.textContent = text;
+  document.getElementById("cm").appendChild(d);
+  document.getElementById("cm").scrollTop = 99999;
+  return d;
+}
+
+document.getElementById("cb2").addEventListener("click", sendChat);
+document.getElementById("ci").addEventListener("keydown", e => {
+  if (e.key === "Enter") sendChat();
+});
+
+
+// ═══════════════════════════════════════════════════════════════
+// RENDERERS — build HTML from state data
+// ═══════════════════════════════════════════════════════════════
+
+function renderSummary() {
+  const s = S.summary;
+  if (!s || !Object.keys(s).length) return;
+  let h = "";
+
+  // Center point box
+  if (s.center_point) {
+    h += `<div class="cpbox">
+      <div style="font-size:.62rem;font-weight:700;text-transform:uppercase;
+        letter-spacing:.8px;color:var(--blue);margin-bottom:.28rem">📍 CENTER POINT</div>
+      ${esc(s.center_point)}</div>`;
+  }
+
+  // Transaction types
+  if (s.transaction_types?.length) {
+    h += `<div class="sh">🔄 Transaction Types</div>
+      <div class="tg">${s.transaction_types.map(t =>
+      `<span class="tag tb">${esc(t)}</span>`).join("")}</div>`;
+  }
+
+  // Business flow
+  if (s.business_flow?.length) {
+    h += `<div class="sh">📊 Business Process Flow</div>
+      <ul class="fl">${s.business_flow.map((f, i) =>
+      `<li class="fi"><span class="fn">${i+1}</span><span>${esc(f)}</span></li>`
+      ).join("")}</ul>`;
+  }
+
+  // Key rules
+  if (s.key_rules?.length) {
+    h += `<div class="sh">📋 Key Business Rules</div>` +
+      s.key_rules.map(r => `<div class="rule">${esc(r)}</div>`).join("");
+  }
+
+  // Critical inputs
+  if (s.critical_inputs?.length) {
+    h += `<div class="sh">📥 Critical Inputs</div>
+      <div class="tg">${s.critical_inputs.map(f =>
+      `<span class="tag tb">${esc(f)}</span>`).join("")}</div>`;
+  }
+
+  // Critical outputs
+  if (s.critical_outputs?.length) {
+    h += `<div class="sh">📤 Critical Outputs</div>
+      <div class="tg">${s.critical_outputs.map(f =>
+      `<span class="tag tg2">${esc(f)}</span>`).join("")}</div>`;
+  }
+
+  // Integration map
+  if (s.integration_map?.length) {
+    h += `<div class="sh">🔗 Integration Map</div>
+      <div class="tg">${s.integration_map.map(t =>
+      `<span class="tag tt">${esc(t)}</span>`).join("")}</div>`;
+  }
+
+  // Test data
+  if (s.test_data_needed?.length) {
+    h += `<div class="sh">🏗️ Test Data Required</div>
+      <div class="tg">${s.test_data_needed.map(t =>
+      `<span class="tag ta">${esc(t)}</span>`).join("")}</div>`;
+  }
+
+  // Risks
+  if (s.risks?.length) {
+    h += `<div class="sh">⚠️ Risks &amp; Assumptions</div>` +
+      s.risks.map(r => `<div class="ri">⚠️ ${esc(r)}</div>`).join("");
+  }
+
+  document.getElementById("sumc").innerHTML = h || emp("📋","Summary empty","");
+}
+
+
+function renderTCs() {
+  if (!S.tcs.length) return;
+
+  const rows = S.tcs.map((tc, i) => {
+    const scn = String(tc.scenario || "POSITIVE").toUpperCase();
+    return `<tr>
+      <td style="text-align:center;font-weight:700;color:var(--slate);font-size:.68rem">${tc.sno||i+1}</td>
+      <td class="tno">${esc(tc.tc_no||"")}</td>
+      <td><span class="fb">${esc(tc.fs_ref||"")}</span></td>
+      <td style="max-width:175px;font-size:.71rem">${esc(tc.test_description||"")}</td>
+      <td><span class="sc sc-${scn}">${scn}</span></td>
+      <td style="max-width:255px;font-size:.7rem;white-space:pre-wrap">${esc(tc.steps||"")}</td>
+      <td style="max-width:235px;font-size:.7rem">${esc(tc.expected_result||"")}</td>
+      <td style="text-align:center;font-size:.68rem;color:var(--slate2)">${esc(tc.pass_fail||"")}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("tcw").innerHTML = `
+    <table class="tc">
+      <thead><tr>
+        <th>S.No</th><th>TC No</th><th>FS</th><th>Description</th>
+        <th>Scenario</th><th>Steps</th><th>Expected Result</th><th>P/F</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+
+function renderGap() {
+  const g = S.gap;
+  if (!g?.gaps) return;
+  const sc  = g.quality_score || 0;
+  const col = sc >= 75 ? "var(--green)" : sc >= 50 ? "var(--amber)" : "var(--red)";
+
+  document.getElementById("gapc").innerHTML =
+    `<div class="gap-score">
+      <div style="font-size:2.7rem;font-weight:800;color:${col};line-height:1">${sc}</div>
+      <div>
+        <div style="font-weight:700;font-size:.88rem">FSD Quality Score / 100</div>
+        <div style="font-size:.74rem;color:var(--slate);margin-top:3px">${esc(g.score_reason||"")}</div>
+      </div>
+    </div>
+    <div style="overflow-x:auto">
+    <table class="gp">
+      <thead><tr><th>GAP ID</th><th>FS</th><th>Missing</th><th>Impact</th><th>Question for BA</th></tr></thead>
+      <tbody>${(g.gaps||[]).map(gp => `<tr>
+        <td style="font-weight:700;font-family:monospace;white-space:nowrap">${esc(gp.gap_id||"")}</td>
+        <td><span class="fb">${esc(gp.fs_ref||"")}</span></td>
+        <td>${esc(gp.missing||"")}</td>
+        <td style="color:var(--red)">${esc(gp.impact||"")}</td>
+        <td style="color:var(--blue);font-style:italic">${esc(gp.question||"")}</td>
+      </tr>`).join("")}</tbody>
+    </table></div>`;
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// UTILITY HELPERS
+// ═══════════════════════════════════════════════════════════════
+
+// POST with JSON body — used for step2, step3, export, chat
+async function postJSON(url, body) {
+  const r = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+
+// POST with FormData — used for step1 (file upload)
+async function postForm(url, fd) {
+  const r = await fetch(url, { method: "POST", body: fd });
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+
+// Show progress overlay
+function showOv(step, lbl, sub) {
+  document.getElementById("ovs").textContent = step;
+  document.getElementById("ovl").textContent = lbl;
+  document.getElementById("ovb").textContent = sub;
+  document.getElementById("ov").classList.add("on");
+}
+
+// Hide progress overlay
+function hideOv() { document.getElementById("ov").classList.remove("on"); }
+
+// Show toast notification
+function toast(msg, type = "ok") {
+  const icons = { ok:"✅", err:"❌", warn:"⚠️" };
+  const d = document.createElement("div");
+  d.className = "toast " + type;
+  d.innerHTML = `${icons[type]||"ℹ️"} ${esc(msg)}`;
+  document.getElementById("toasts").appendChild(d);
+  setTimeout(() => d.remove(), 4200);
+}
+
+// Escape HTML special characters to prevent XSS
+function esc(s) {
+  if (s == null) return "";
+  return String(s)
+    .replace(/&/g,"&amp;")
+    .replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;");
+}
+
+// Empty state placeholder HTML
+function emp(ico, title, sub) {
+  return `<div class="empty"><div class="ei">${ico}</div>
+    <div class="et">${title}</div><div class="es">${sub}</div></div>`;
+}
+</script>
+</body>
+</html>

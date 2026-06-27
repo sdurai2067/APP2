@@ -1,0 +1,34 @@
+# ================================================================
+# requirements.txt — FSD2TESTDOC App2
+# ================================================================
+# Install all dependencies with:
+#   pip install -r requirements.txt
+#   OR
+#   python -m pip install -r requirements.txt
+#
+# PACKAGE PURPOSES:
+#   flask      : Python web server framework
+#                Creates http://localhost:5000 server
+#                Handles all route requests from browser
+#
+#   requests   : HTTP client library
+#                Used to POST prompts to Gemini API
+#                All Gemini calls go through requests.post()
+#
+#   python-docx: Read Microsoft Word .docx files
+#                Extracts paragraph text from uploaded DOCX FSDs
+#
+#   pypdf      : Read PDF files page by page
+#                Extracts text from uploaded PDF FSDs
+#                Skips first 2 pages (cover/author pages)
+#
+#   openpyxl   : Create and format Excel .xlsx files
+#                Builds the 3-sheet test case workbook
+#                No API call needed — pure Python Excel generation
+# ================================================================
+
+flask>=3.0.0
+requests>=2.31.0
+python-docx>=1.1.0
+pypdf>=4.0.0
+openpyxl>=3.1.2
